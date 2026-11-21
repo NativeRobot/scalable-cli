@@ -33,18 +33,20 @@ Config file locations:
 ## Windows (experimental)
 
 This fork uses Windows Credential Manager for the session by default. It stores
-the compressed session as one credential; if compression cannot reduce it below
+the compressed session as one credential; if compression cannot reduce it to
 the 2,560-byte Windows credential limit, saving fails explicitly and the previous
 credential is not overwritten. If this happens after token rotation, a new login
 may be required because the previous refresh token may no longer be valid. An
-existing file-backed session is not migrated
-automatically; selecting `session_backend = "file"` retains access to it.
+existing file-backed session is not migrated automatically; selecting
+`session_backend = "file"` retains access to it. There is no automatic fallback
+to file storage when Credential Manager is unavailable.
 
 The software DPoP signing key is stored as plaintext in `auth-signing-key.json`
 in the configuration directory. File-backed sessions also contain plaintext
 tokens. The CLI does not set or verify Windows file or directory ACLs; review and
 restrict the configuration directory's inherited permissions before logging in.
 Windows support in this fork is experimental and not an official Scalable release.
+See the [Windows guide](windows.md) for build, login, and troubleshooting steps.
 
 ## Linux servers and containers
 

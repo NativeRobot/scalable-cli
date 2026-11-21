@@ -11,7 +11,7 @@
 
 <h1 align="center">Scalable CLI</h1>
 
-<p align="center"><strong>The official, agent-ready command line for the Scalable Broker.</strong></p>
+<p align="center"><strong>An unofficial fork of the agent-ready command line for the Scalable Broker.</strong></p>
 
 **This is an unofficial fork.** Its Windows support is experimental and is not
 distributed or supported by Scalable Capital.
@@ -70,10 +70,13 @@ from source on an older distribution is a workaround.
 
 ### Windows (experimental)
 
-Build the `scalable.exe` alias from this fork with Rust and the native Windows
-build prerequisites (including a C/C++ toolchain for `aws-lc-sys`):
+Clone this fork's `feature/windows-support` branch and build `scalable.exe`
+with Rust and the Windows native build prerequisites (including a C/C++ toolchain
+for `aws-lc-sys`):
 
 ```powershell
+git clone --branch feature/windows-support https://github.com/NativeRobot/scalable-cli.git
+Set-Location scalable-cli
 cargo build --locked --release --features channel-prod --bin scalable
 .\target\release\scalable.exe --version
 .\target\release\scalable.exe --help
@@ -82,9 +85,9 @@ cargo build --locked --release --features channel-prod --bin scalable
 Use the alias or a full path: `sc.exe` is also the name of the Windows Service
 Control command. The session defaults to Windows Credential Manager; the
 software signing key is stored separately in a file. Review the Windows storage
-limitations in [Configuration](public-docs/configuration.md#windows-experimental)
-before authenticating. Login and broker operations require separate validation
-against the live service.
+limitations before authenticating. The [Windows guide](public-docs/windows.md)
+covers prerequisites, setup, testing, security limitations, and troubleshooting.
+Login and broker operations require separate validation against the live service.
 
 ### Provenance and verification
 
@@ -115,6 +118,9 @@ target/release/sc --help
 The binary is written to `target/release/sc`. A self-built binary is not an
 official Scalable-distributed release artifact.
 
+On Windows, use the `scalable.exe` build and invocation described in the
+[Windows guide](public-docs/windows.md), rather than the Unix paths above.
+
 ## Quick start
 
 Before you authenticate, enable Scalable CLI on the Scalable web platform
@@ -130,6 +136,10 @@ sc broker overview --json
 
 `sc login` uses an OAuth 2.0 device-code flow. Complete login yourself in a
 browser rather than via an AI agent.
+
+On Windows, replace `sc` in these examples and throughout the documentation with
+`scalable.exe` (or its full path) to avoid the Windows Service Control command.
+See the [Windows guide](public-docs/windows.md#first-login-and-read-only-checks).
 
 For a locally enforced read-only session, use `sc login --local-read-only`.
 This blocks CLI write commands locally; it does not restrict backend token
@@ -268,6 +278,7 @@ read-only mode, trade controls, PKCS#11, and dedicated Unix-user setups.
 | [Command reference](public-docs/commands.md) | Command examples, product behavior, trading, and recovery |
 | [Automation](public-docs/automation.md) | Session limits, rate limits, JSON, and upgrades |
 | [Configuration](public-docs/configuration.md) | Storage, local controls, and advanced setups |
+| [Windows (experimental)](public-docs/windows.md) | Building, running, testing, and storage limitations on Windows |
 | [Verify release artifacts](public-docs/verify-releases.md) | Provenance, signed checksums, and macOS verification |
 
 ### Help
