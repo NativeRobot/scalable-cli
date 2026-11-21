@@ -13,6 +13,9 @@
 
 <p align="center"><strong>The official, agent-ready command line for the Scalable Broker.</strong></p>
 
+**This is an unofficial fork.** Its Windows support is experimental and is not
+distributed or supported by Scalable Capital.
+
 <p align="center">Built for developers, local automation, and AI agents that need deterministic commands, structured JSON, and explicit confirmation for sensitive actions.</p>
 
 <br />
@@ -64,6 +67,24 @@ Official Linux binaries require **glibc 2.38 or newer**. Older distributions,
 such as Debian 12 (`glibc 2.36`), cannot run these binaries. Official release
 artifacts do not support musl-based distributions such as Alpine. Building
 from source on an older distribution is a workaround.
+
+### Windows (experimental)
+
+Build the `scalable.exe` alias from this fork with Rust and the native Windows
+build prerequisites (including a C/C++ toolchain for `aws-lc-sys`):
+
+```powershell
+cargo build --locked --release --features channel-prod --bin scalable
+.\target\release\scalable.exe --version
+.\target\release\scalable.exe --help
+```
+
+Use the alias or a full path: `sc.exe` is also the name of the Windows Service
+Control command. The session defaults to Windows Credential Manager; the
+software signing key is stored separately in a file. Review the Windows storage
+limitations in [Configuration](public-docs/configuration.md#windows-experimental)
+before authenticating. Login and broker operations require separate validation
+against the live service.
 
 ### Provenance and verification
 
@@ -219,9 +240,11 @@ revocation, rate-limit errors, JSON handling, and upgrade guidance.
 - macOS: `~/.config/scalable-cli/config.toml`
 - Linux: `$XDG_CONFIG_HOME/scalable-cli/config.toml` when `XDG_CONFIG_HOME` is
   set, otherwise `~/.config/scalable-cli/config.toml`
+- Windows: `%HOME%\.config\scalable-cli\config.toml`, using `%USERPROFILE%`
+  if `HOME` is unset or empty.
 
-Sessions default to `keyring` on macOS and Linux. Signing keys default to
-`secure_enclave` on macOS and `file` on Linux.
+Sessions default to `keyring` on macOS, Linux, and Windows. Signing keys default
+to `secure_enclave` on macOS and `file` on Linux and Windows.
 
 On a Linux server or container without Secret Service, use file-based session
 storage by adding this to `config.toml`:

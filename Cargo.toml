@@ -8,6 +8,10 @@ rust-version = "1.96"
 name = "sc"
 path = "src/main.rs"
 
+[[bin]]
+name = "scalable"
+path = "src/scalable.rs"
+
 [features]
 channel-prod = []
 
@@ -46,6 +50,11 @@ security-framework-sys = "2.17"
 [target.'cfg(target_os = "linux")'.dependencies]
 cryptoki = "0.12"
 dbus-secret-service-keyring-store = { version = "1.0", features = ["crypto-rust", "vendored"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+flate2 = "1.1"
+fs2 = "0.4"
+windows-native-keyring-store = { version = "1.0", default-features = false }
 
 [dev-dependencies]
 assert_cmd = "2.0"

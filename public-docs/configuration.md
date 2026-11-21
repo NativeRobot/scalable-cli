@@ -19,14 +19,32 @@ signing_key_backend = "secure_enclave"
 
 Configuration options:
 
-- session_backend: where the login session is stored. Supported values: `keyring`, `file`. Default is `keyring` on macOS/Linux.
-- signing_key_backend: where the authentication signing key is stored. Supported values: `file`, `secure_enclave`, `pkcs11`. Default is `secure_enclave` on macOS and `file` on Linux. `secure_enclave` is macOS-only. `pkcs11` is Linux-only and opt-in.
+- session_backend: where the login session is stored. Supported values: `keyring`, `file`. Default is `keyring` on macOS/Linux/Windows.
+- signing_key_backend: where the authentication signing key is stored. Supported values: `file`, `secure_enclave`, `pkcs11`. Default is `secure_enclave` on macOS and `file` on Linux/Windows. `secure_enclave` is macOS-only. `pkcs11` is Linux-only and opt-in.
 
 Config file locations:
 
 - macOS: `~/.config/scalable-cli/config.toml`
 - Linux: `$XDG_CONFIG_HOME/scalable-cli/config.toml` when `XDG_CONFIG_HOME` is
   set, otherwise `~/.config/scalable-cli/config.toml`
+- Windows: `%HOME%\.config\scalable-cli\config.toml`, using `%USERPROFILE%`
+  if `HOME` is unset or empty.
+
+## Windows (experimental)
+
+This fork uses Windows Credential Manager for the session by default. It stores
+the compressed session as one credential; if compression cannot reduce it below
+the 2,560-byte Windows credential limit, saving fails explicitly and the previous
+credential is not overwritten. If this happens after token rotation, a new login
+may be required because the previous refresh token may no longer be valid. An
+existing file-backed session is not migrated
+automatically; selecting `session_backend = "file"` retains access to it.
+
+The software DPoP signing key is stored as plaintext in `auth-signing-key.json`
+in the configuration directory. File-backed sessions also contain plaintext
+tokens. The CLI does not set or verify Windows file or directory ACLs; review and
+restrict the configuration directory's inherited permissions before logging in.
+Windows support in this fork is experimental and not an official Scalable release.
 
 ## Linux servers and containers
 

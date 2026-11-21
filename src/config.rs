@@ -52,9 +52,15 @@ impl FromStr for TargetEnv {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum SessionBackendPreference {
-    #[cfg_attr(any(target_os = "macos", target_os = "linux"), default)]
+    #[cfg_attr(
+        any(target_os = "macos", target_os = "linux", target_os = "windows"),
+        default
+    )]
     Keyring,
-    #[cfg_attr(not(any(target_os = "macos", target_os = "linux")), default)]
+    #[cfg_attr(
+        not(any(target_os = "macos", target_os = "linux", target_os = "windows")),
+        default
+    )]
     File,
 }
 
@@ -309,6 +315,8 @@ pub fn ensure_private_dir(dir: &Path) -> Result<()> {
 }
 
 pub fn set_private_file_permissions(path: &Path) -> Result<()> {
+    #[cfg(not(unix))]
+    let _ = path;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -436,6 +444,16 @@ fn default_home_dir_path() -> Result<PathBuf> {
 fn home_dir_from_env() -> Option<PathBuf> {
     std::env::var_os("HOME")
         .filter(|value| !value.is_empty())
+        .or_else(|| {
+            #[cfg(windows)]
+            {
+                std::env::var_os("USERPROFILE").filter(|value| !value.is_empty())
+            }
+            #[cfg(not(windows))]
+            {
+                None
+            }
+        })
         .map(PathBuf::from)
 }
 
@@ -618,16 +636,28 @@ mod tests {
 
     #[test]
     fn default_session_backend_matches_platform_policy() {
-        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
         assert_eq!(
             RuntimeAuthConfig::default().session_backend,
             SessionBackendPreference::Keyring
         );
 
-        #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+        #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
         assert_eq!(
             RuntimeAuthConfig::default().session_backend,
             SessionBackendPreference::File
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_home_uses_userprofile_when_home_is_missing() {
+        let _lock = crate::lock_test_env();
+        let _home = EnvGuard::unset("HOME");
+        let _profile = EnvGuard::set("USERPROFILE", r"C:\Users\example");
+        assert_eq!(
+            home_dir_from_env(),
+            Some(PathBuf::from(r"C:\Users\example"))
         );
     }
 

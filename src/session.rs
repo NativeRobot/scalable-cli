@@ -20,7 +20,7 @@ const ACTIVE_SESSION_LOCK_FILENAME: &str = "session.lock";
 const SESSION_REFRESH_LOCK_FILENAME: &str = "session-refresh.lock";
 
 pub const SECRET_STORAGE_UNAVAILABLE_PREFIX: &str =
-    "OS secret storage (keyring/Secret Service) is unavailable.";
+    "OS secret storage (keyring/Credential Manager/Secret Service) is unavailable.";
 
 #[derive(Debug)]
 pub enum SessionStorageError {
@@ -143,6 +143,15 @@ impl KeyringStore {
 impl SecretStore for KeyringStore {
     fn get(&self, key: &str) -> Result<Option<String>> {
         let entry = keyring_entry(key)?;
+        #[cfg(windows)]
+        {
+            return match entry.get_secret() {
+                Ok(bytes) => Ok(Some(windows_secret::decode(&bytes)?)),
+                Err(keyring_core::Error::NoEntry) => Ok(None),
+                Err(err) => Err(map_keyring_error(err)),
+            };
+        }
+        #[cfg(not(windows))]
         match entry.get_password() {
             Ok(value) => Ok(Some(value)),
             Err(keyring_core::Error::NoEntry) => Ok(None),
@@ -152,6 +161,11 @@ impl SecretStore for KeyringStore {
 
     fn set(&self, key: &str, value: &str) -> Result<()> {
         let entry = keyring_entry(key)?;
+        #[cfg(windows)]
+        entry
+            .set_secret(&windows_secret::encode(value)?)
+            .map_err(map_keyring_error)?;
+        #[cfg(not(windows))]
         entry.set_password(value).map_err(map_keyring_error)?;
         Ok(())
     }
@@ -162,6 +176,152 @@ impl SecretStore for KeyringStore {
             Ok(()) => Ok(()),
             Err(keyring_core::Error::NoEntry) => Ok(()),
             Err(err) => Err(map_keyring_error(err)),
+        }
+    }
+}
+
+#[cfg(windows)]
+mod windows_secret {
+    use anyhow::{Context, Result, bail};
+    use flate2::{Compression, read::DeflateDecoder, write::DeflateEncoder};
+    use std::io::{Read, Write};
+
+    const MAGIC: &[u8] = b"sc-deflate-v1\0";
+    const MAX_CREDENTIAL_BYTES: usize = 2560;
+    const MAX_DECOMPRESSED_BYTES: usize = 1024 * 1024;
+
+    pub(super) fn encode(value: &str) -> Result<Vec<u8>> {
+        if value.len() > MAX_DECOMPRESSED_BYTES {
+            bail!("Session exceeds the maximum supported size for Windows credential storage");
+        }
+        let mut encoder = DeflateEncoder::new(Vec::new(), Compression::best());
+        encoder
+            .write_all(value.as_bytes())
+            .context("Failed to compress session")?;
+        let compressed = encoder
+            .finish()
+            .context("Failed to finish session compression")?;
+        if MAGIC.len() + compressed.len() > MAX_CREDENTIAL_BYTES {
+            bail!(
+                "Compressed session exceeds the Windows Credential Manager 2560-byte limit; the existing session was not overwritten"
+            );
+        }
+        let mut result = Vec::with_capacity(MAGIC.len() + compressed.len());
+        result.extend_from_slice(MAGIC);
+        result.extend_from_slice(&compressed);
+        Ok(result)
+    }
+
+    pub(super) fn decode(value: &[u8]) -> Result<String> {
+        if let Some(compressed) = value.strip_prefix(MAGIC) {
+            let mut output = Vec::new();
+            DeflateDecoder::new(compressed)
+                .take((MAX_DECOMPRESSED_BYTES + 1) as u64)
+                .read_to_end(&mut output)
+                .context("Failed to decompress stored session")?;
+            if output.len() > MAX_DECOMPRESSED_BYTES {
+                bail!("Stored session exceeds the maximum decompressed size");
+            }
+            return String::from_utf8(output).context("Stored session is not valid UTF-8");
+        }
+        if value.len() % 2 != 0 {
+            bail!("Stored Windows credential has an invalid legacy UTF-16 encoding");
+        }
+        let words: Vec<u16> = value
+            .chunks_exact(2)
+            .map(|p| u16::from_le_bytes([p[0], p[1]]))
+            .collect();
+        String::from_utf16(&words).context("Stored Windows credential has invalid UTF-16")
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn round_trip_large_payload_within_credential_limit() {
+            let payload = format!(
+                "{{\"access_token\":\"{}\",\"refresh_token\":\"{}\"}}",
+                "abc123".repeat(350),
+                "def456".repeat(300)
+            );
+            assert!(payload.len() > MAX_CREDENTIAL_BYTES);
+            let encoded = encode(&payload).unwrap();
+            assert!(encoded.len() <= MAX_CREDENTIAL_BYTES);
+            assert_eq!(decode(&encoded).unwrap(), payload);
+        }
+
+        #[test]
+        fn oversized_incompressible_payload_fails_before_writing() {
+            let mut state = 0x1234_5678u32;
+            let payload: String = (0..10000)
+                .map(|_| {
+                    state ^= state << 13;
+                    state ^= state >> 17;
+                    state ^= state << 5;
+                    char::from(b'!' + (state % 90) as u8)
+                })
+                .collect();
+            assert!(
+                encode(&payload)
+                    .unwrap_err()
+                    .to_string()
+                    .contains("2560-byte limit")
+            );
+        }
+
+        #[test]
+        fn legacy_utf16_and_corrupt_data_are_handled() {
+            let legacy: Vec<u8> = "legacy session"
+                .encode_utf16()
+                .flat_map(u16::to_le_bytes)
+                .collect();
+            assert_eq!(decode(&legacy).unwrap(), "legacy session");
+            assert!(decode(&[0x01]).is_err());
+            assert!(decode(&[MAGIC, &[0xff, 0xff, 0xff]].concat()).is_err());
+        }
+
+        #[test]
+        fn decompression_is_bounded() {
+            let mut encoder = DeflateEncoder::new(Vec::new(), Compression::best());
+            encoder
+                .write_all(&vec![b'a'; MAX_DECOMPRESSED_BYTES + 1])
+                .unwrap();
+            let data = [MAGIC, &encoder.finish().unwrap()].concat();
+            assert!(
+                decode(&data)
+                    .unwrap_err()
+                    .to_string()
+                    .contains("maximum decompressed size")
+            );
+        }
+
+        #[test]
+        #[ignore = "requires a Windows user credential store"]
+        fn native_credential_store_round_trip() {
+            use keyring_core::api::CredentialStoreApi;
+            let store = windows_native_keyring_store::Store::new().unwrap();
+            let user = format!(
+                "windows-test-{}-{}",
+                std::process::id(),
+                rand::random::<u64>()
+            );
+            let entry = store
+                .build("scalable-cli-windows-test", &user, None)
+                .unwrap();
+            struct Cleanup(keyring_core::Entry);
+            impl Drop for Cleanup {
+                fn drop(&mut self) {
+                    let _ = self.0.delete_credential();
+                }
+            }
+            let entry = Cleanup(entry);
+            let original = "test-session-".repeat(400);
+            entry.0.set_secret(&encode(&original).unwrap()).unwrap();
+            assert_eq!(decode(&entry.0.get_secret().unwrap()).unwrap(), original);
+            entry.0.set_password("legacy").unwrap();
+            assert_eq!(decode(&entry.0.get_secret().unwrap()).unwrap(), "legacy");
+            entry.0.delete_credential().unwrap();
         }
     }
 }
@@ -487,7 +647,12 @@ fn lock_file_exclusive(file: &fs::File) -> Result<()> {
     }
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
+fn lock_file_exclusive(file: &fs::File) -> Result<()> {
+    fs2::FileExt::lock_exclusive(file).context("Failed to acquire Windows file lock")
+}
+
+#[cfg(not(any(unix, windows)))]
 fn lock_file_exclusive(_file: &fs::File) -> Result<()> {
     Ok(())
 }

@@ -601,7 +601,25 @@ fn lock_file(file: &File, nonblocking: bool) -> Result<bool> {
     Err(error).context("flock LOCK_EX failed")
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
+fn lock_file(file: &File, nonblocking: bool) -> Result<bool> {
+    let result = if nonblocking {
+        fs2::FileExt::try_lock_exclusive(file)
+    } else {
+        fs2::FileExt::lock_exclusive(file)
+    };
+    match result {
+        Ok(()) => Ok(true),
+        Err(err)
+            if nonblocking && err.raw_os_error() == fs2::lock_contended_error().raw_os_error() =>
+        {
+            Ok(false)
+        }
+        Err(err) => Err(err).context("Failed to acquire Windows confirmation lock"),
+    }
+}
+
+#[cfg(not(any(unix, windows)))]
 fn lock_file(_file: &File, _nonblocking: bool) -> Result<bool> {
     bail!("SAVINGS_PLAN_SUBMISSION_UNKNOWN: advisory file locks are unavailable on this platform")
 }
@@ -610,6 +628,19 @@ fn lock_file(_file: &File, _nonblocking: bool) -> Result<bool> {
 mod tests {
     use super::*;
     use tempfile::TempDir;
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_locks_exclude_other_handles_and_release_on_drop() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("lock");
+        let first = open_lock_file(&path).unwrap();
+        let second = open_lock_file(&path).unwrap();
+        assert!(lock_file(&first, true).unwrap());
+        assert!(!lock_file(&second, true).unwrap());
+        drop(first);
+        assert!(lock_file(&second, true).unwrap());
+    }
 
     struct EnvGuard {
         previous: Option<String>,

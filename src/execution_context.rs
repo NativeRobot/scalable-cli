@@ -286,7 +286,11 @@ fn usage_command_name(error: &ClapError) -> Option<String> {
     let mut command_parts = Vec::new();
     for token in tokens
         .split_whitespace()
-        .skip_while(|token| *token != "sc")
+        .skip_while(|token| {
+            !["sc", "sc.exe", "scalable", "scalable.exe"]
+                .iter()
+                .any(|name| token.eq_ignore_ascii_case(name))
+        })
         .skip(1)
     {
         if token.starts_with('[') || token.starts_with('<') || token.starts_with('-') {
@@ -396,6 +400,17 @@ mod tests {
             parse_failure_command_name(&error, &RawArgsCommandMatch::default()),
             "broker.context.select"
         );
+    }
+
+    #[test]
+    fn parse_failure_accepts_windows_binary_names() {
+        for binary in ["sc.exe", "SC.EXE", "scalable", "scalable.exe"] {
+            let error = parse_error(&[binary, "broker", "context", "select", "--json"]);
+            assert_eq!(
+                parse_failure_command_name(&error, &RawArgsCommandMatch::default()),
+                "broker.context.select"
+            );
+        }
     }
 
     #[test]
